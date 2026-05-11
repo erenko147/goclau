@@ -20,24 +20,24 @@ The plugin talks to a small local Python server, which runs the `claude` CLI (Cl
 
 ### 1. Install the plugin
 
-Copy the `addons/claude_code_godot/` folder into your Godot project's `addons/` directory.
+Copy the `addons/goclau/` folder into your Godot project's `addons/` directory.
 
 In Godot: **Project → Project Settings → Plugins** → enable **GoClau**.
 
 ### 2. Start the bridge server
 
-Click the **Start Server** button inside the GoClau panel — it automatically launches `addons/claude_code_godot/server/claude_server.py` using Python in the background.
+Click the **Start Server** button inside the GoClau panel — it automatically launches `addons/goclau/server/claude_server.py` using Python in the background.
 
 If auto-start fails (Python not in PATH), start it manually:
 
 **Linux / macOS:**
 ```bash
-python3 addons/claude_code_godot/server/claude_server.py
+python3 addons/goclau/server/claude_server.py
 ```
 
 **Windows:**
 ```
-python addons\claude_code_godot\server\claude_server.py
+python addons\goclau\server\claude_server.py
 ```
 
 The server runs on `http://127.0.0.1:9876` by default.
@@ -68,7 +68,7 @@ The Python server exposes a minimal REST API on `http://127.0.0.1:9876`:
 ## Project structure
 
 ```
-addons/claude_code_godot/
+addons/goclau/
   plugin.cfg          # Godot plugin metadata
   plugin.gd           # EditorPlugin entry point
   claude_panel.gd     # Bottom-panel chat UI
