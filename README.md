@@ -22,25 +22,25 @@ The plugin talks to a small local Python server, which runs the `claude` CLI (Cl
 
 Copy the `addons/claude_code_godot/` folder into your Godot project's `addons/` directory.
 
-In Godot: **Project → Project Settings → Plugins** → enable **Claude Code**.
+In Godot: **Project → Project Settings → Plugins** → enable **GoClau**.
 
 ### 2. Start the bridge server
 
+Click the **Start Server** button inside the GoClau panel — it automatically launches `addons/claude_code_godot/server/claude_server.py` using Python in the background.
+
+If auto-start fails (Python not in PATH), start it manually:
+
 **Linux / macOS:**
 ```bash
-cd server/
-./start_server.sh
-# or: python3 claude_server.py
+python3 addons/claude_code_godot/server/claude_server.py
 ```
 
 **Windows:**
 ```
-server\start_server.bat
+python addons\claude_code_godot\server\claude_server.py
 ```
 
-The server runs on `http://127.0.0.1:9876` by default. Pass a port number as an argument to change it (e.g. `./start_server.sh 9877`).
-
-> **Tip:** The plugin's "Start Server" button attempts to auto-launch the server for you. If it fails (Python not in PATH), start it manually from the terminal.
+The server runs on `http://127.0.0.1:9876` by default.
 
 ### 3. Use it
 
@@ -73,11 +73,8 @@ addons/claude_code_godot/
   plugin.gd           # EditorPlugin entry point
   claude_panel.gd     # Bottom-panel chat UI
   claude_client.gd    # HTTP client wrapper
-
-server/
-  claude_server.py    # Python bridge server
-  start_server.sh     # Linux/macOS launcher
-  start_server.bat    # Windows launcher
+  server/
+    claude_server.py  # Python bridge server (no extra dependencies)
 ```
 
 ## Troubleshooting

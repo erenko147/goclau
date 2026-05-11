@@ -1,9 +1,9 @@
 ## Bottom-panel UI for the Claude Code Godot plugin.
 ## Builds its own scene tree programmatically so no .tscn file is needed.
 @tool
-extends Control
+extends VBoxContainer
 
-const ClaudeClient = preload("res://addons/claude_code_godot/claude_client.gd")
+const _ClientScript = preload("res://addons/claude_code_godot/claude_client.gd")
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 const C_USER       := Color(0.60, 0.85, 1.00)
@@ -14,28 +14,38 @@ const C_STATUS_OK  := Color(0.40, 0.90, 0.40)
 const C_STATUS_ERR := Color(0.90, 0.40, 0.40)
 
 # ── Nodes ─────────────────────────────────────────────────────────────────────
-var _client: ClaudeClient
+var _client: Node  # instance of claude_client.gd
 
+# Server box
+var _server_box:    PanelContainer
 var _status_dot:    Label
 var _status_label:  Label
 var _port_spin:     SpinBox
 var _server_btn:    Button
-var _chat_log:      RichTextLabel
+var _stop_btn:      Button
+var _server_hint:   Label
+
+# Chat
+var _chat_log:       RichTextLabel
 var _context_script: CheckBox
 var _context_scene:  CheckBox
-var _input:         TextEdit
-var _send_btn:      Button
-var _clear_btn:     Button
-var _run_input:     LineEdit
-var _run_btn:       Button
+var _input:          TextEdit
+var _send_btn:       Button
+var _clear_btn:      Button
+var _run_input:      LineEdit
+var _run_btn:        Button
 
+# State
 var _server_running: bool = false
 var _waiting:        bool = false
+
+## Set by the EditorPlugin immediately after instantiation.
+var plugin: Node = null
 
 
 func _ready() -> void:
 	_build_ui()
-	_client = ClaudeClient.new()
+	_client = _ClientScript.new()
 	add_child(_client)
 	_client.response_received.connect(_on_response)
 	_client.request_failed.connect(_on_error)
@@ -45,56 +55,80 @@ func _ready() -> void:
 # ── UI Construction ───────────────────────────────────────────────────────────
 
 func _build_ui() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.add_theme_constant_override("separation", 4)
-	add_child(root)
-
-	root.add_child(_build_toolbar())
-	root.add_child(_build_chat_area())
-	root.add_child(_build_context_bar())
-	root.add_child(_build_input_bar())
-	root.add_child(_build_run_bar())
+	add_theme_constant_override("separation", 4)
+	add_child(_build_server_box())
+	add_child(_build_chat_area())
+	add_child(_build_context_bar())
+	add_child(_build_input_bar())
+	add_child(_build_run_bar())
 
 
-func _build_toolbar() -> HBoxContainer:
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 8)
+func _build_server_box() -> PanelContainer:
+	_server_box = PanelContainer.new()
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	_server_box.add_child(vbox)
+
+	# ── Row 1: status indicator ──────────────────────────────────────────────
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 6)
+	vbox.add_child(row1)
 
 	_status_dot = Label.new()
 	_status_dot.text = "●"
 	_status_dot.add_theme_color_override("font_color", C_STATUS_ERR)
-	bar.add_child(_status_dot)
+	row1.add_child(_status_dot)
 
 	_status_label = Label.new()
-	_status_label.text = "Server offline"
+	_status_label.text = "Bridge server offline"
 	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(_status_label)
+	_status_label.clip_text = true
+	row1.add_child(_status_label)
+
+	# ── Row 2: controls ───────────────────────────────────────────────────────
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 4)
+	vbox.add_child(row2)
 
 	var port_label := Label.new()
 	port_label.text = "Port:"
-	bar.add_child(port_label)
+	row2.add_child(port_label)
 
 	_port_spin = SpinBox.new()
 	_port_spin.min_value = 1024
 	_port_spin.max_value = 65535
 	_port_spin.value = 9876
-	_port_spin.custom_minimum_size.x = 90
-	bar.add_child(_port_spin)
+	_port_spin.custom_minimum_size.x = 80
+	_port_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_port_spin.value_changed.connect(func(_v): _update_server_box())
+	row2.add_child(_port_spin)
 
 	_server_btn = Button.new()
-	_server_btn.text = "Start Server"
-	_server_btn.pressed.connect(_on_server_btn_pressed)
-	bar.add_child(_server_btn)
+	_server_btn.text = "Start"
+	_server_btn.pressed.connect(_on_start_server_pressed)
+	row2.add_child(_server_btn)
 
-	var new_chat_btn := Button.new()
-	new_chat_btn.text = "New Chat"
-	new_chat_btn.pressed.connect(_on_new_chat_pressed)
-	bar.add_child(new_chat_btn)
+	_stop_btn = Button.new()
+	_stop_btn.text = "Stop"
+	_stop_btn.visible = false
+	_stop_btn.pressed.connect(_on_stop_server_pressed)
+	row2.add_child(_stop_btn)
 
-	return bar
+	var check_btn := Button.new()
+	check_btn.text = "↺"
+	check_btn.tooltip_text = "Check server connection"
+	check_btn.pressed.connect(_check_server)
+	row2.add_child(check_btn)
+
+	# ── Row 2: hint text ──────────────────────────────────────────────────────
+	_server_hint = Label.new()
+	_server_hint.text = "Starts  python3 server/claude_server.py  in the background. Requires Python 3 and the claude CLI in your PATH."
+	_server_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_server_hint.add_theme_color_override("font_color", C_SYSTEM)
+	vbox.add_child(_server_hint)
+
+	return _server_box
 
 
 func _build_chat_area() -> ScrollContainer:
@@ -111,7 +145,7 @@ func _build_chat_area() -> ScrollContainer:
 	_chat_log.custom_minimum_size.y = 120
 	scroll.add_child(_chat_log)
 
-	_log_system("Claude Code is ready. Start the server, then type a message.")
+	_log_system("Start the bridge server above, then type a message.")
 	return scroll
 
 
@@ -130,6 +164,15 @@ func _build_context_bar() -> HBoxContainer:
 	_context_scene.text = "Scene Info"
 	bar.add_child(_context_scene)
 
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(spacer)
+
+	var new_chat_btn := Button.new()
+	new_chat_btn.text = "New Chat"
+	new_chat_btn.pressed.connect(_on_new_chat_pressed)
+	bar.add_child(new_chat_btn)
+
 	return bar
 
 
@@ -138,7 +181,7 @@ func _build_input_bar() -> HBoxContainer:
 	bar.add_theme_constant_override("separation", 4)
 
 	_input = TextEdit.new()
-	_input.placeholder_text = "Ask Claude anything about your Godot project…"
+	_input.placeholder_text = "Ask Claude anything about your Godot project… (Enter to send, Shift+Enter for newline)"
 	_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_input.custom_minimum_size.y = 56
 	_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
@@ -188,42 +231,66 @@ func _build_run_bar() -> HBoxContainer:
 # ── Server management ─────────────────────────────────────────────────────────
 
 func _check_server() -> void:
+	if _client.is_busy():
+		return  # a chat/run request is in flight; skip the status ping
 	_client.base_url = "http://127.0.0.1:%d" % int(_port_spin.value)
 	_client.check_status()
 
 
-func _on_server_btn_pressed() -> void:
+func _on_start_server_pressed() -> void:
 	if _server_running:
-		_log_system("Server must be stopped from the terminal (close the python process).")
 		return
 
-	var plugin: EditorPlugin = _get_plugin()
-	if plugin:
-		var pid := plugin.start_server(int(_port_spin.value))
-		if pid > 0:
-			_log_system("Server process started (PID %d). Checking connection…" % pid)
-			await get_tree().create_timer(1.5).timeout
-			_check_server()
-		else:
-			_log_system(
-				"Could not auto-start server. Run [b]server/start_server.sh[/b] manually.",
-				C_ERROR
-			)
-	else:
+	if plugin == null:
 		_log_system(
-			"Plugin reference unavailable. Run [b]server/start_server.sh[/b] manually.",
+			"Plugin reference not set. Run server/start_server.sh manually.",
+			C_ERROR
+		)
+		return
+
+	_server_btn.disabled = true
+	_server_btn.text = "…"
+	_server_hint.text = "Launching bridge server…"
+
+	var pid: int = plugin.call("start_server", int(_port_spin.value))
+
+	if pid > 0:
+		_log_system("Bridge server started (PID %d). Waiting for it to come online…" % pid)
+		# Give Python a moment to bind the port, then check.
+		await get_tree().create_timer(1.5).timeout
+		_check_server()
+	else:
+		_server_btn.disabled = false
+		_server_btn.text = "Start"
+		_server_hint.text = "Auto-start failed. Check that Python 3 is in your PATH, or run  server/start_server.sh  manually."
+		_log_system(
+			"Could not launch server automatically. See hint above.",
 			C_ERROR
 		)
 
 
-func _get_plugin() -> EditorPlugin:
-	# Walk up to the plugin node which owns this panel.
-	var n: Node = get_parent()
-	while n:
-		if n is EditorPlugin:
-			return n as EditorPlugin
-		n = n.get_parent()
-	return null
+func _on_stop_server_pressed() -> void:
+	if plugin != null:
+		plugin.call("_stop_server")
+	_server_running = false
+	_update_server_box()
+	_log_system("Server stopped.")
+
+
+func _update_server_box() -> void:
+	_status_dot.add_theme_color_override(
+		"font_color", C_STATUS_OK if _server_running else C_STATUS_ERR
+	)
+	_status_label.text = (
+		"Bridge server online  (http://127.0.0.1:%d)" % int(_port_spin.value)
+		if _server_running else
+		"Bridge server offline"
+	)
+	_server_btn.text    = "Start"
+	_server_btn.visible = not _server_running
+	_server_btn.disabled = false
+	_stop_btn.visible   = _server_running
+	_server_hint.text = "Server is running. Claude Code is ready to use." if _server_running else "Starts  python3 server/claude_server.py  in the background. Requires Python 3 and the claude CLI in your PATH."
 
 
 # ── Sending messages ──────────────────────────────────────────────────────────
@@ -236,8 +303,10 @@ func _on_send_pressed() -> void:
 
 
 func _on_input_gui_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_ENTER and event.ctrl_pressed:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ENTER:
+		if event.shift_pressed:
+			pass  # let TextEdit insert a newline normally
+		else:
 			_on_send_pressed()
 			_input.accept_event()
 
@@ -258,24 +327,19 @@ func _send_message(message: String) -> void:
 	_set_waiting(true)
 	_log_user(message)
 	_input.clear()
-
-	var context := _gather_context()
-	_client.send_message(message, context)
+	_client.send_message(message, _gather_context())
 
 
 func _gather_context() -> String:
 	var parts: Array[String] = []
-
 	if _context_script.button_pressed:
-		var script_ctx := _get_current_script_context()
-		if not script_ctx.is_empty():
-			parts.append(script_ctx)
-
+		var s := _get_current_script_context()
+		if not s.is_empty():
+			parts.append(s)
 	if _context_scene.button_pressed:
-		var scene_ctx := _get_current_scene_context()
-		if not scene_ctx.is_empty():
-			parts.append(scene_ctx)
-
+		var s := _get_current_scene_context()
+		if not s.is_empty():
+			parts.append(s)
 	return "\n\n".join(parts)
 
 
@@ -302,15 +366,16 @@ func _get_current_scene_context() -> String:
 	var root := EditorInterface.get_edited_scene_root()
 	if not root:
 		return ""
-	var info := _describe_node(root, 0)
-	return "=== Current Scene: %s ===\n%s" % [root.scene_file_path, info]
+	return "=== Current Scene: %s ===\n%s" % [
+		root.scene_file_path, _describe_node(root, 0)
+	]
 
 
 func _describe_node(node: Node, depth: int) -> String:
 	var indent := "  ".repeat(depth)
 	var line := "%s- %s (%s)" % [indent, node.name, node.get_class()]
 	var lines := [line]
-	if depth < 3:  # limit depth to avoid massive context
+	if depth < 3:
 		for child in node.get_children():
 			lines.append(_describe_node(child, depth + 1))
 	elif node.get_child_count() > 0:
@@ -328,13 +393,14 @@ func _on_new_chat_pressed() -> void:
 func _on_response(payload: Dictionary) -> void:
 	_set_waiting(false)
 	if payload.has("status"):
-		# /status or /reset response
+		# /status ping or /reset confirmation — either way the server is reachable.
 		var ok: bool = payload.get("status") == "ok"
-		_server_running = ok
-		_update_status_indicator(ok)
-		if ok:
-			_server_btn.text = "Running"
-			_server_btn.disabled = true
+		if ok and not _server_running:
+			_server_running = true
+			_update_server_box()
+		elif not ok:
+			_server_running = false
+			_update_server_box()
 		return
 
 	var response: String = payload.get("response", "(empty response)")
@@ -343,9 +409,9 @@ func _on_response(payload: Dictionary) -> void:
 
 func _on_error(error: String) -> void:
 	_set_waiting(false)
-	if error.contains("Connection refused") or error.contains("Network error"):
+	if "Connection refused" in error or "Network error" in error or "Failed" in error:
 		_server_running = false
-		_update_status_indicator(false)
+		_update_server_box()
 	_log_system("Error: " + error, C_ERROR)
 
 
@@ -354,13 +420,6 @@ func _set_waiting(waiting: bool) -> void:
 	_send_btn.disabled = waiting
 	_run_btn.disabled = waiting
 	_send_btn.text = "…" if waiting else "Send"
-
-
-func _update_status_indicator(online: bool) -> void:
-	_status_dot.add_theme_color_override("font_color", C_STATUS_OK if online else C_STATUS_ERR)
-	_status_label.text = "Server online" if online else "Server offline"
-	_server_btn.text = "Running" if online else "Start Server"
-	_server_btn.disabled = online
 
 
 # ── Log helpers ───────────────────────────────────────────────────────────────
@@ -372,9 +431,10 @@ func _log_user(text: String) -> void:
 
 
 func _log_assistant(text: String) -> void:
-	var formatted := _format_markdown(text)
 	_chat_log.append_text(
-		"\n[color=#%s][b]Claude:[/b][/color]\n%s\n" % [C_ASSISTANT.to_html(false), formatted]
+		"\n[color=#%s][b]Claude:[/b][/color]\n%s\n" % [
+			C_ASSISTANT.to_html(false), _format_markdown(text)
+		]
 	)
 
 
@@ -385,27 +445,23 @@ func _log_system(text: String, color: Color = C_SYSTEM) -> void:
 
 
 func _escape(text: String) -> String:
-	return text.replace("[", "[[")  # prevent accidental BBCode in user input
+	return text.replace("[", "[[")
 
 
 func _format_markdown(text: String) -> String:
-	# Very lightweight Markdown → BBCode conversion for code blocks and bold.
 	var result := text
 
-	# Fenced code blocks  ```lang\n...\n```
 	var re_code := RegEx.new()
 	re_code.compile("```[a-z]*\\n([\\s\\S]*?)```")
 	for m in re_code.search_all(result):
 		var code := m.get_string(1).replace("[", "[[")
 		result = result.replace(m.get_string(), "[code]%s[/code]" % code)
 
-	# Inline `code`
 	var re_inline := RegEx.new()
 	re_inline.compile("`([^`]+)`")
 	for m in re_inline.search_all(result):
 		result = result.replace(m.get_string(), "[code]%s[/code]" % m.get_string(1))
 
-	# **bold**
 	var re_bold := RegEx.new()
 	re_bold.compile("\\*\\*(.+?)\\*\\*")
 	for m in re_bold.search_all(result):

@@ -11,6 +11,7 @@ import os
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
+from typing import Optional, Tuple
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 9876
@@ -26,7 +27,7 @@ SYSTEM_PROMPT = (
 )
 
 
-def run_claude(prompt: str, cwd: str | None = None) -> tuple[str, int]:
+def run_claude(prompt: str, cwd: Optional[str] = None) -> Tuple[str, int]:
     """Run claude CLI with a prompt, return (output, returncode)."""
     try:
         result = subprocess.run(
@@ -66,6 +67,7 @@ def build_chat_prompt(message: str, context: str) -> str:
 class ClaudeHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send_cors_headers(200)
+        self.end_headers()
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -114,7 +116,7 @@ class ClaudeHandler(BaseHTTPRequestHandler):
     def _handle_reset(self):
         with lock:
             conversation_history.clear()
-        self._respond(200, {"status": "conversation reset"})
+        self._respond(200, {"status": "ok", "reset": True})
 
     def _handle_run(self, data: dict):
         command = data.get("command", "").strip()
